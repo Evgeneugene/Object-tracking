@@ -87,9 +87,10 @@ class SimpleTracker:
         return self.tracks
 
 
+
 if __name__ == "__main__":
     args = sys.argv[1:]
-    output_filename = args[0]
+    output_filename = "output_videos/" + args[0]
     # Define your class names based on IDs
     class_names = {
         2: 'car',
@@ -99,7 +100,7 @@ if __name__ == "__main__":
     }
 
     # Open the video file
-    video_path = 'min_trim.mkv'
+    video_path = 'input_videos/min_trim.mkv'
     cap = cv2.VideoCapture(video_path)
 
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -111,7 +112,7 @@ if __name__ == "__main__":
     out = cv2.VideoWriter(output_filename, fourcc, frame_rate, size)
 
     # Load model
-    model = YOLO("yolo-Weights/yolov8n.pt")
+    model = YOLO("models/yolov8n.pt")
 
     # Initialize the simple tracker
     tracker = SimpleTracker()
