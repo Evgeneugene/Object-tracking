@@ -100,7 +100,7 @@ def postprocess(
     input_hw:Tuple[int, int],
     orig_img:np.ndarray,
     min_conf_threshold:float = 0.1,
-    nms_iou_threshold:float = 0.13,
+    nms_iou_threshold:float = 0.05,
     agnosting_nms:bool = False,
     max_detections:int = 300,
 ):
