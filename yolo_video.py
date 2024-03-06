@@ -1,12 +1,13 @@
 from ultralytics import YOLO
 import cv2
 import math
-from collections import defaultdict
-import numpy as np
-import time
 from tqdm import tqdm
 import sys
 from collections import defaultdict, deque
+from pathlib import Path
+import ipywidgets as widgets
+import openvino as ov
+import image_processing
 
 
 def get_iou(bb1, bb2):
@@ -47,7 +48,7 @@ def get_iou(bb1, bb2):
 
 
 class SimpleTracker:
-    def __init__(self, max_lost=5, iou_threshold=0.4):
+    def __init__(self, max_lost=5, iou_threshold=0.35):
         self.max_lost = max_lost
         self.iou_threshold = iou_threshold
         self.tracks = []
@@ -59,6 +60,9 @@ class SimpleTracker:
 
         for det in detections:
             (x1, y1, x2, y2, conf, cls_id) = det
+
+            if int(cls_id) not in class_names:
+                continue
 
             best_track = None
             max_iou = self.iou_threshold
@@ -87,6 +91,98 @@ class SimpleTracker:
         return self.tracks
 
 
+def init_model(DET_MODEL_NAME, models_dir):
+    models_dir = Path(models_dir)
+    det_model = YOLO(models_dir / f'{DET_MODEL_NAME}.pt')
+
+    # object detection model
+    det_model_path = models_dir / f"{DET_MODEL_NAME}_openvino_model/{DET_MODEL_NAME}.xml"
+    if not det_model_path.exists():
+        det_model.export(format="openvino", dynamic=True, half=False)
+
+    core = ov.Core()
+
+    device = widgets.Dropdown(
+        options=core.available_devices + ["AUTO"],
+        value='AUTO',
+        description='Device:',
+        disabled=False,
+    )
+
+    core = ov.Core()
+
+    det_ov_model = core.read_model(det_model_path)
+    if device.value != "CPU":
+        det_ov_model.reshape({0: [1, 3, 640, 640]})
+    ov_config = {}
+    if "GPU" in device.value or ("AUTO" in device.value and "GPU" in core.available_devices):
+        ov_config = {"GPU_DISABLE_WINOGRAD_CONVOLUTION": "YES"}
+    det_compiled_model = core.compile_model(det_ov_model, device.value, ov_config)
+
+    return det_compiled_model
+
+
+def draw_results(img, tracks, track_histories, current_frames):
+    # Draw tracking line
+    for obj_id in track_histories:
+        if len(track_histories[obj_id]) > 0 and current_frames - track_histories[obj_id][0]['current_frames'] >= 50:
+            track_histories[obj_id].popleft()
+
+        for i in range(1, len(track_histories[obj_id])):
+            start_point = (track_histories[obj_id][i - 1]['cx'], track_histories[obj_id][i - 1]['cy'])
+            end_point = (track_histories[obj_id][i]['cx'], track_histories[obj_id][i]['cy'])
+            cv2.line(img, start_point, end_point, (0, 255, 0), 2)
+
+    # Draw the tracks
+    for track in tracks:
+        x1, y1, x2, y2 = int(track['x1']), int(track['y1']), int(track['x2']), int(track['y2'])
+        obj_id = int(track['id'])
+        cls_id = int(track['cls_id'])
+        confidence_rounded = math.ceil(track['conf'] * 100) / 100
+
+        class_name = class_names[cls_id]
+
+        # Calculate the center coordinates of the bounding box
+        cx = int((x1 + x2) // 2)
+        cy = int((y1 + y2) // 2)
+
+        # Update history of track
+        track_histories[obj_id].append({'cx': cx, 'cy': cy, 'current_frames': current_frames})
+
+        # Draw a circle at the center and display the object ID
+        cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1)
+
+        # Calculate dynamic font size based on bounding box size
+        box_width = x2 - x1
+        box_height = y2 - y1
+        avg_box_size = (box_width + box_height) / 2
+        font_scale = max(0.4, avg_box_size / 250)  # Adjust the denominator to control the scaling factor
+
+        # Display object ID with dynamic font size
+        cv2.putText(img, f"ID: {obj_id}", (cx - 10, cy - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
+                    2)
+
+        # Draw bounding box
+        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 140, 255), 3)
+
+        # Set text options
+        font_thickness = max(1, int(font_scale * 2))
+        text = f"{class_name}, {confidence_rounded}"
+
+        # Get text size
+        (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
+
+        # Set background rectangle coordinates
+        background_tl = x1, y1 - text_height - 3
+        background_br = x1 + text_width, y1
+
+        # Draw filled rectangle for text background
+        cv2.rectangle(img, background_tl, background_br, (0, 140, 255), -1)  # Orange background
+
+        # Draw text
+        text_position = x1, y1 - 2
+        cv2.putText(img, text, text_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
+
 
 if __name__ == "__main__":
     args = sys.argv[1:]
@@ -112,7 +208,7 @@ if __name__ == "__main__":
     out = cv2.VideoWriter(output_filename, fourcc, frame_rate, size)
 
     # Load model
-    model = YOLO("models/yolov8n.pt")
+    model = init_model("yolov8n", "models")
 
     # Initialize the simple tracker
     tracker = SimpleTracker()
@@ -122,87 +218,37 @@ if __name__ == "__main__":
     track_histories = defaultdict(lambda: deque(maxlen=50))  # Store up to 50 points for each track
 
     current_frames = 0
-    print("_"*10, frame_rate)
     while True:
         success, img = cap.read()
         if not success:
             break  # Exit if the video ends or there are no frames left
 
         current_frames += 1
-        results = model(img, stream=True, classes=list(class_names.keys()), verbose=False)
 
-        # Extract detections
-        detections = []
-        for r in results:
-            boxes = r.boxes
-            for box in boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                conf = box.conf
-                cls_id = int(box.cls[0])  # Get the class ID
-                detections.append((x1, y1, x2, y2, conf, cls_id))
+        # Make predictioins
+        # results = model(img, stream=True, classes=list(class_names.keys()), verbose=False)
+        preprocessed_image = image_processing.preprocess_image(img)
+        input_tensor = image_processing.image_to_tensor(preprocessed_image)
+        result = model(input_tensor)
+        boxes = result[model.output(0)]
+        input_hw = input_tensor.shape[2:]
+        detections = image_processing.postprocess(pred_boxes=boxes, input_hw=input_hw, orig_img=img)[0]['det']
+
+        # # Extract detections
+        # detections = []
+        # for r in results:
+        #     boxes = r.boxes
+        #     for box in boxes:
+        #         x1, y1, x2, y2 = map(int, box.xyxy[0])
+        #         conf = box.conf
+        #         cls_id = int(box.cls[0])  # Get the class ID
+        #         if cls_id in class_names.values():
+        #             detections.append((x1, y1, x2, y2, conf, cls_id))
 
         # Update the tracker with the new detections
         tracks = tracker.update(detections)
 
-        # Draw the tracks
-        for track in tracks:
-            x1, y1, x2, y2 = track['x1'], track['y1'], track['x2'], track['y2']
-            obj_id = track['id']
-            cls_id = track['cls_id']
-            conf = track['conf']
-
-            # Calculate the center coordinates of the bounding box
-            cx = (x1 + x2) // 2
-            cy = (y1 + y2) // 2
-
-            # Update history of track
-            track_histories[obj_id].append({'cx': cx, 'cy': cy, 'current_frames': current_frames})
-
-            # Draw a circle at the center and display the object ID
-            cv2.circle(img, (cx, cy), 5, (0, 255, 0), -1)
-
-            # Calculate dynamic font size based on bounding box size
-            box_width = x2 - x1
-            box_height = y2 - y1
-            avg_box_size = (box_width + box_height) / 2
-            font_scale = max(0.4, avg_box_size / 250)  # Adjust the denominator to control the scaling factor
-
-            # Display object ID with dynamic font size
-            cv2.putText(img, f"ID: {obj_id}", (cx - 10, cy - 10), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255),
-                        2)
-
-            # Draw bounding box
-            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 140, 255), 3)
-
-            # Get confidence and class name
-            confidence_rounded = math.ceil(track['conf'] * 100) / 100
-            class_name = class_names[cls_id]
-
-            font_thickness = max(1, int(font_scale * 2))
-            text = f"{class_name}, {confidence_rounded}"
-            # Get text size
-            (text_width, text_height), _ = cv2.getTextSize(text, cv2.FONT_HERSHEY_SIMPLEX, font_scale, font_thickness)
-
-            # Set background rectangle coordinates
-            background_tl = x1, y1 - text_height - 3
-            background_br = x1 + text_width, y1
-
-            # Draw filled rectangle for text background
-            cv2.rectangle(img, background_tl, background_br, (0, 140, 255), -1)  # Orange background
-
-            # Draw text
-            text_position = x1, y1 - 2
-            cv2.putText(img, text, text_position, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), font_thickness)
-
-        # Draw tracking line
-        for obj_id in track_histories:
-            if len(track_histories[obj_id]) > 0 and current_frames - track_histories[obj_id][0]['current_frames'] >= 50:
-                track_histories[obj_id].popleft()
-
-            for i in range(1, len(track_histories[obj_id])):
-                start_point = (track_histories[obj_id][i - 1]['cx'], track_histories[obj_id][i - 1]['cy'])
-                end_point = (track_histories[obj_id][i]['cx'], track_histories[obj_id][i]['cy'])
-                cv2.line(img, start_point, end_point, (0, 255, 0), 2)
+        draw_results(img, tracks, track_histories, current_frames)
 
         progress_bar.update(1)
         out.write(img)

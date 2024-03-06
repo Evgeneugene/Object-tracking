@@ -1,4 +1,3 @@
 .DS_Store
-
-output_videos/testing.avi output_videos/yolov8m.avi output_videos/yolov8n.avi
+output_videos/
 input_videos/min_trim.mkv
