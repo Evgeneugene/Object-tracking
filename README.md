@@ -36,6 +36,6 @@ This approach leverages OpenVino's efficiency for fast inference on CPU and Non-
 
 ## Demo
 
+[Video link](https://youtu.be/zjbV-xx7T8g)
 ![Preview](img_demo/photo.png)
 
-![Video link](https://youtu.be/zjbV-xx7T8g)
