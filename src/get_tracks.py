@@ -7,6 +7,7 @@ import openvino as ov
 import image_processing
 from tracking import SimpleTracker
 from draw import draw_results
+import time
 
 
 def init_model(DET_MODEL_NAME, models_dir):
@@ -58,7 +59,7 @@ def main(args):
     file_extension = input_filename.split(".")[-1]
     output_filename = "/app/output_videos/" + \
         input_filename_no_ext + "_detections." + file_extension
-    
+
     # Define your class names based on IDs
     class_names = {
         2: 'car',
@@ -93,36 +94,52 @@ def main(args):
     track_histories = defaultdict(lambda: deque(maxlen=50))
 
     current_frames = 0
-    while True:
-        success, img = cap.read()
-        if not success:
-            break  # Exit if the video ends or there are no frames left
+    total_time = 0
+    try:
+        while True:
+            success, img = cap.read()
+            if not success:
+                break  # Exit if the video ends or there are no frames left
 
-        current_frames += 1
+            start_time = time.time()
+            current_frames += 1
 
-        # Make predictioins
-        preprocessed_image = image_processing.preprocess_image(img)
-        input_tensor = image_processing.image_to_tensor(preprocessed_image)
-        result = model(input_tensor)
-        boxes = result[model.output(0)]
-        input_hw = input_tensor.shape[2:]
-        detections = image_processing.postprocess(
-            pred_boxes=boxes, input_hw=input_hw, orig_img=img)[0]['det']
+            # Make predictioins
+            preprocessed_image = image_processing.preprocess_image(img)
+            input_tensor = image_processing.image_to_tensor(preprocessed_image)
+            result = model(input_tensor)
+            boxes = result[model.output(0)]
+            input_hw = input_tensor.shape[2:]
+            detections = image_processing.postprocess(
+                pred_boxes=boxes, input_hw=input_hw, orig_img=img)[0]['det']
 
-        # Update the tracker with the new detections
-        tracks = tracker.update(detections)
+            # Update the tracker with the new detections
+            tracks = tracker.update(detections)
 
-        draw_results(img, tracks, track_histories, current_frames, class_names)
+            draw_results(img, tracks, track_histories,
+                         current_frames, class_names)
 
-        progress_bar.update(1)
-        out.write(img)
-        # cv2.imshow("Tracking", img)
-        # if cv2.waitKey(1) == ord('q'):
-        #     break
+            progress_bar.update(1)
+            out.write(img)
 
-    cap.release()
-    cv2.destroyAllWindows()
-    progress_bar.close()
+            end_time = time.time()  # Record the end time after processing the frame
+            # Calculate the processing time for the frame
+            processing_time = end_time - start_time
+            total_time += processing_time
+
+    except KeyboardInterrupt:
+        print("Keyboard Interrupt detected. Exiting gracefully.")
+    finally:
+        cap.release()
+        progress_bar.close()
+        if current_frames > 0:
+            average_fps = current_frames / total_time
+            print(f"Input FPS: {frame_rate}")
+            print(f"Average FPS: {average_fps:.2f}")
+            print(f"Average speed: {average_fps / frame_rate:.2f} of real time")
+        else:
+            print("No frames processed")
+        
 
 
 if __name__ == "__main__":
