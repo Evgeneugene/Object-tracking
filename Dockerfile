@@ -1,4 +1,4 @@
-# For more information, please refer to https://aka.ms/vscode-docker-python
+# Ultralytics images comes with all other requirements
 FROM ultralytics/ultralytics:latest-python
 
 # Keeps Python from generating .pyc files in the container
@@ -7,18 +7,12 @@ ENV PYTHONDONTWRITEBYTECODE=1
 # Turns off buffering for easier container logging
 ENV PYTHONUNBUFFERED=1
 
-# Install pip requirements
-# COPY requirements.txt .
-# RUN python -m pip install -r requirements.txt
-# RUN apt-get update && apt-get install ffmpeg libsm6 libxext6  -y
-
 WORKDIR /app
 # COPY s. /app
 
 # Creates a non-root user with an explicit UID and adds permission to access the /app folder
-# For more info, please refer to https://aka.ms/vscode-docker-python-configure-containers
 RUN adduser -u 5678 --disabled-password --gecos "" appuser && chown -R appuser /app
 USER appuser
 
-# During debugging, this entry point will be overridden. For more information, please refer to https://aka.ms/vscode-docker-python-debug
+# During debugging, this entry point will be overridden. 
 ENTRYPOINT ["python", "src/get_tracks.py"]
