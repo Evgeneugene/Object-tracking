@@ -31,8 +31,8 @@ This approach leverages OpenVino's efficiency for fast inference on CPU and Non-
 
 ## Perfomance
 
-1. **Speed** The program writes the output video with visualized tracks on average 10fps, whereas the input video framerate is 25fps, so there is a little overhead, unfortunately. As a simple solution, we can skip some frames.
-2. **Accuracy** In general, the tracks are qiute accurate, but sometimes some perturbations arise. It works much more accurately with a bit larger model as YOLOv8s or YOLOv8s, but the speed suffers.
+1. **Speed**: The program writes the output video with visualized tracks on average 10fps, whereas the input video framerate is 25fps, so there is a little overhead, unfortunately. As a simple solution, we can skip some frames.
+2. **Accuracy**: In general, the tracks are qiute accurate, but sometimes some perturbations arise. It works much more accurately with a bit larger model as YOLOv8s or YOLOv8s, but the speed suffers.
 
 ## Demo
 
